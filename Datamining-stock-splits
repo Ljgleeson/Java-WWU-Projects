@@ -1,0 +1,173 @@
+package assignment1;
+
+import java.io.*;
+
+public class GleesonAssignment1 {
+			
+		public static void main(String[] args) {
+			BufferedReader reader;
+			try {
+				reader = new BufferedReader(new FileReader("Stockmarket-1990-2015.txt"));
+				String line = reader.readLine();
+				//counters for specific companies
+				int applCount = 0;
+				int fbCount = 0;
+				int googCount = 0;
+				int ibmCount = 0;
+				int intcCount = 0;
+				int msftCount = 0;
+				int yhooCount = 0;
+				//get the total number of lines in file + each companies section
+				while(line != null) {
+				String[] Array = line.split("	");
+				String whichcompany = Array[0];
+					if(whichcompany.contains("AAPL") == true) {
+						 applCount = applCount + 1;
+					} 
+					else if(whichcompany.contains("FB") == true){
+						fbCount = fbCount + 1;
+					}
+					else if(whichcompany.contains("GOOG") == true) {
+						googCount = googCount + 1;
+					}
+					else if(whichcompany.contains("IBM") == true) {
+						ibmCount = ibmCount + 1;
+					}
+					else if(whichcompany.contains("INTC") == true) {
+						intcCount = intcCount + 1;
+					}
+					else if(whichcompany.contains("MSFT") == true) {
+						msftCount = msftCount + 1;
+					}
+					else{
+						yhooCount = yhooCount + 1;		
+					}							
+				line = reader.readLine();
+				}
+				//correct position for each company in the file & call helper function
+				fbCount += applCount;
+				googCount += fbCount;
+				ibmCount += googCount;
+				intcCount += ibmCount;
+				msftCount += intcCount;
+				yhooCount += msftCount;
+				arrayCreation(applCount, fbCount, googCount, ibmCount, intcCount, msftCount, yhooCount);
+				reader.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		//reads the file and creates a 2d array filled with each line & each word in those lines
+		 static void arrayCreation(int acount, int fcount, int gcount, int icount, int incount, int mcount, int ycount) {
+			BufferedReader reader;
+			try {	
+				reader = new BufferedReader(new FileReader("Stockmarket-1990-2015.txt"));
+				String line = reader.readLine();
+				String multsArray[][] = new String[ycount][8];
+				float multdArray[][] = new float[ycount][8];
+				int counter = 0;			
+				while(line != null) {
+					String[] Array = line.split("	");
+					//creates a 2d array with each value for each line
+					for(int i = 0; i < 8; i++) {
+						multsArray[counter][i] = Array[i];
+					} 
+					//creates another 2d array for values that are doubles in the file
+					for(int x = 2; x < 6; x ++) {
+						String word = Array[x];		
+						float value = Float.parseFloat(word);
+						multdArray[counter][x] = value;
+					}
+					counter = counter + 1;
+					line = reader.readLine();
+				}
+				reader.close();			
+				//call output to get the formatting of the output to be correct.
+				output(multsArray, multdArray, 0, acount);
+				output(multsArray, multdArray, acount, fcount);
+				output(multsArray, multdArray, fcount, gcount);
+				output(multsArray, multdArray, gcount, icount);
+				output(multsArray, multdArray, icount, incount);
+				output(multsArray, multdArray, incount, mcount);
+				output(multsArray, multdArray, mcount, ycount - 1);	
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		 
+
+		 public static void output(String multsArray[][], float multdArray[][], int scount, int fcount) {
+				int crazy = 0;
+				System.out.println("Processing " + multsArray[scount][0]);
+				System.out.println("======================");	
+				//find each crazy day
+				for(int i = scount; i < fcount; i++) {
+					if(((multdArray[i][3] - multdArray[i][4])/multdArray[i][3]) >= .15) {
+						crazy ++;
+						//System.out.println("Crazy day: " + multsArray[i][1] + ("	") + (((multdArray[i][3] - multdArray[i][4])/multdArray[i][3]) * 100));
+						System.out.printf("Crazy day: " + multsArray[i][1] + ("	"));
+						System.out.printf( " %.02f %n", (((multdArray[i][3] - multdArray[i][4])/multdArray[i][3]) * 100));
+					}
+				}
+				System.out.println("Total crazy days = " + crazy);
+				//to calculate the craziest day and the specfic date of it
+				if(crazy > 0) {
+					float iArray[] = new float[crazy]; 
+					int crazyCount = 0;
+					int location[] = new int [crazy];
+					for(int i = scount; i < fcount; i++) {
+						if(((multdArray[i][3] - multdArray[i][4])/multdArray[i][3]) >= .15) {
+							iArray[crazyCount] = (((multdArray[i][3] - multdArray[i][4])/multdArray[i][3]) * 100);
+							location[crazyCount] = i; 
+							crazyCount ++;
+						}
+					}
+					float max = iArray[0];
+					int j = 0;
+					for(int i = 1; i < crazy; i++) {
+						if(iArray[i] > max) {
+							max = iArray[i];
+							j = i;
+						}
+					}
+					String newmax = String.format("%.02f", max);
+					System.out.println("The craziest day: " + multsArray[location[j]][1] + "   " +  newmax);
+				}		
+				//find each split
+				System.out.println(" ");
+				int split = 0;
+				for(int i = scount; i < fcount; i++) {				
+					if(Math.abs((multdArray[i+1][5]/multdArray[i][2]) - 2) < .05) {
+						split ++;
+						float close = multdArray[i+1][5];
+						String sclose = String.format("%.02f", close);
+						float open = multdArray[i][2];
+						String sopen = String.format("%.02f", open);
+						System.out.println("2:1 split on " + multsArray[i+1][1] + " " + sclose + " --> " + sopen);
+					} 
+					else if(Math.abs((multdArray[i+1][5]/multdArray[i][2]) - 3) < .05) {
+						split ++;
+						float close = multdArray[i+1][5];
+						String sclose = String.format("%.02f", close);
+						float open = multdArray[i][2];
+						String sopen = String.format("%.02f", open);
+						System.out.println("3:1 split on " + multsArray[i+1][1] + " " + sclose + " --> " + sopen);
+					}
+					else if(Math.abs((multdArray[i+1][5]/multdArray[i][2]) - 1.5) < .05) {
+						split ++;
+						float close = multdArray[i+1][5];
+						String sclose = String.format("%.02f", close);
+						float open = multdArray[i][2];
+						String sopen = String.format("%.02f", open);
+						System.out.println("3:2 split on " + multsArray[i+1][1] + " " + sclose + " --> " + sopen);
+					}
+					else {
+					
+					}
+				}
+				System.out.println("Total number of splits: " + split);
+				System.out.println(" ");
+		 }
+		
+}
+
