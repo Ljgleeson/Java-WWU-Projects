@@ -1,0 +1,345 @@
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.*;
+import java.io.*;
+
+public class GleesonAssignment3 {
+
+	static final String defaultReaderParams = "readerparams.txt";
+	static final String defaultWriterParams = "writerparams.txt";
+	static Connection readerConn = null;   
+	static Connection writerConn = null;
+	// To Do: Other variables
+	
+	
+	static final String getCompanyQuery = 
+			"select P.Ticker, P.TransDate, P.openPrice, P.closePrice" +
+			" from pricevolume P natural join company" +
+			" where Ticker = ?" +
+			" and TransDate >= ?" +
+			" and TransDate <= ?" +
+			" order by TransDate, Ticker";
+
+	static final String getDatesQuery =
+			"select max(startDate), min(endDate)" +
+		        "  from (select Ticker, min(TransDate) as StartDate, max(TransDate) as endDate," +
+		        "            count(distinct TransDate) as tradingDays" +
+		        "          from company natural join pricevolume" +
+		        "          where Industry = ?" +
+		        "          group by Ticker" +
+		        "          having tradingDays >= 150) as TickerDates";
+	    
+	static final String getTickerDatesQuery = 
+			"select Ticker, min(TransDate) as StartDate, max(TransDate) as endDate," +
+	        "      count(distinct TransDate) as tradingDays" +
+	        "  from company natural join pricevolume" +
+	        "  where Industry = ?" +
+	        "    and TransDate >= ? and TransDate <= ?" +
+	        "  group by Ticker" +
+	        "  having tradingDays >= 150" +
+	        "  order by Ticker";
+	        
+	static final String getIndustryPriceDataQuery =
+			"select Ticker, TransDate, OpenPrice, ClosePrice" +
+	        "  from pricevolume natural join company" +
+	        "  where Industry = ?" +
+	        "    and TransDate >= ? and TransDate <= ?" +
+	        "  order by TransDate, Ticker";
+
+	static final String getAllIndustries = 
+				"select distinct Industry" +
+	            "  from company" +
+	            "  order by Industry";		
+	
+	static final String dropPerformanceTable =
+			"drop table if exists Performance;";
+	
+	static final String createPerformanceTable =
+			"create table Performance (" +
+	        "  Industry char(30)," +
+	        "  Ticker char(6)," +
+	        "  StartDate char(10)," +
+	        "  EndDate char(10)," +
+	        "  TickerReturn char(12)," +
+	        "  IndustryReturn char(12)" +
+	        "  );";
+	    
+	static final String insertPerformance =
+			"insert into Performance(Industry, Ticker, StartDate, EndDate, TickerReturn, IndustryReturn)" +
+	        "  values(?, ?, ?, ?, ?, ?);";
+	
+	private static final String IndustryData = null;
+
+	    
+	static class IndustryData {
+		List<String> tickerList;
+		String startDate;
+		String endDate;
+		int commonDays;
+		public IndustryData(List<String> tickers, String startD, String endD, int numDays) {
+			this.tickerList = tickers;
+			this.startDate = startD;
+			this.endDate = endD;
+			this.commonDays = numDays;
+		}
+	}
+	
+	
+	public static void main(String[] args) throws Exception {	    
+		// Get connection properties
+		Properties readerProps = new Properties();
+		readerProps.load(new FileInputStream(defaultReaderParams));
+		Properties writerProps = new Properties();
+		writerProps.load(new FileInputStream(defaultWriterParams));		
+		
+		try {
+			// Setup Reader and Writer Connection
+			setupReader(readerProps);
+			setupWriter(writerProps);
+			
+			List<String> industries = getIndustries();
+			System.out.printf("%d industries found%n", industries.size());
+			for (String industry : industries) {
+				System.out.printf("%s%n", industry);
+			} 
+			System.out.println(); 
+			Statement tstmt = writerConn.createStatement();
+			tstmt.execute(dropPerformanceTable);
+			tstmt.execute(createPerformanceTable);
+			tstmt.close();	
+			for (String industry : industries) {
+				System.out.printf("Processing %s%n", industry);				
+				IndustryData iData = processIndustry(industry);
+				if (iData != null && iData.tickerList.size() > 2) {
+					System.out.printf("%d accepted tickers for %s(%s - %s), %d common dates%n",
+							iData.tickerList.size(), industry, iData.startDate, iData.endDate, iData.commonDays);
+					processIndustryGains(industry, iData); //does the calculation part				
+				}
+				else
+					System.out.printf("Insufficient data for %s => no analysis%n", industry);
+				System.out.println();
+	            }			
+			System.out.println("Database connections closed");
+	
+		} catch (SQLException ex) {
+			System.out.printf("SQLException: %s%nSQLState: %s%nVendorError: %s%n",
+					ex.getMessage(), ex.getSQLState(), ex.getErrorCode());
+		}
+			
+	}
+	   
+	static void setupReader(Properties connectProps) throws SQLException {
+		String dburl = connectProps.getProperty("dburl");
+		String username = connectProps.getProperty("user");
+		readerConn = DriverManager.getConnection(dburl, connectProps);
+		System.out.printf("Reader connection %s %s established.%n", dburl, username);
+
+		PreparedStatement getDates = readerConn.prepareStatement(getDatesQuery);
+		PreparedStatement getTickerDates = readerConn.prepareStatement(getTickerDatesQuery);
+		PreparedStatement getIndustryPriceData = readerConn.prepareStatement(getIndustryPriceDataQuery);
+	} 
+	    
+	    
+	static void setupWriter(Properties connectProps) throws SQLException {
+		String dburl = connectProps.getProperty("dburl");
+		String username = connectProps.getProperty("user");
+		writerConn = DriverManager.getConnection(dburl, connectProps);
+		System.out.printf("Writer connection %s %s established.%n", dburl, username);
+		
+		// Create Performance Table; If this table already exists, drop it first
+		Statement tstmt = writerConn.createStatement();
+		//drop and create a table anew each time you run your program. drop table if exist performance.
+		tstmt.execute(dropPerformanceTable);
+		tstmt.execute(createPerformanceTable);
+		tstmt.close();		
+		PreparedStatement insertPerformanceData = writerConn.prepareStatement(insertPerformance);
+	} 
+	    
+	static List<String> getIndustries() throws SQLException {
+		List<String> result = new ArrayList<>();
+		PreparedStatement pstmt = readerConn.prepareStatement(getAllIndustries);			
+        ResultSet rs = pstmt.executeQuery();
+        while(rs.next()) {
+        	result.add(rs.getString(1));
+        }		
+		return result;			
+	}
+   
+	
+	static IndustryData processIndustry(String industry) throws SQLException {
+		// To Do: Execute the appropriate SQL queries (you need two of them) and return an object of IndustryData  
+		List<String> tickers = new ArrayList<>();
+		String startDate = null;
+		String endDate = null;
+		int commonDays = 0;
+		PreparedStatement pstmt = readerConn.prepareStatement(getDatesQuery);
+        pstmt.setString(1, industry);
+        ResultSet ers = pstmt.executeQuery();
+        ers.next();
+        String startD = ers.getString(1);
+        String endD = ers.getString(2);
+      
+        PreparedStatement opstmt = readerConn.prepareStatement(getTickerDatesQuery);
+        opstmt.setString(1, industry);
+        opstmt.setString(2, startD);
+        opstmt.setString(3, endD);
+        ResultSet ors = opstmt.executeQuery();
+        while(ors.next()) {
+        	tickers.add(ors.getString(1));
+        	startDate = ors.getString(2);
+        	endDate = ors.getString(3);
+        	commonDays = ors.getInt(4);
+        }       		
+        return new IndustryData (tickers, startD, endD, commonDays);
+	}
+	 
+	
+	static void processIndustryGains(String industry, IndustryData data) throws SQLException {
+		// In this method, you should calculate the ticker return and industry return. 
+		Statement tstmt = writerConn.createStatement();
+		PreparedStatement insertPerformanceData = writerConn.prepareStatement(insertPerformance);
+		
+		int trade_interval_num = (data.commonDays / 60 ); //one trade interval = 60 days. 
+		double company_num = data.tickerList.size();
+		String current_company = null;
+		int multiplier = 1;
+				
+			
+		//loop for amount of intervals need to calculate. 
+		for(int i = 0; i < trade_interval_num; i++) {			
+			
+			double [] ticker_return_arr = new double [(int) company_num]; 
+			String [] start_return_arr = new String [trade_interval_num]; 
+			String [] end_return_arr = new String [trade_interval_num];
+			
+			//another loop for each company we need to calculate for. 
+			for(int j = 0; j < company_num; j++) {
+
+				double divisor = 1.0;
+				Deque<String> date_de_que = new ArrayDeque<String>(10000);         
+				Deque<Double> de_que = new ArrayDeque<Double>(10000);
+
+				current_company = data.tickerList.get(j);
+				PreparedStatement fstmt = readerConn.prepareStatement(getCompanyQuery);
+				PreparedStatement stmt = readerConn.prepareStatement(getCompanyQuery);
+				fstmt.setString(1, current_company);
+				fstmt.setString(2, data.startDate);
+				fstmt.setString(3, data.endDate);					
+				stmt.setString(1, current_company);
+				stmt.setString(2, data.startDate);
+				stmt.setString(3, data.endDate);						
+				
+				ResultSet rs = fstmt.executeQuery();
+				ResultSet oldrs = stmt.executeQuery();
+				        	        				        
+				//get all date, open, and close for a company, adjusted for splits
+				if (rs.next()) {
+					date_de_que.add(rs.getString(1));
+					date_de_que.add(rs.getString(2));
+					de_que.add(rs.getDouble(3)/divisor); //open
+					de_que.add(rs.getDouble(4)/divisor);		//close		
+					while(rs.next()) {    
+						oldrs.next();       		
+						if((Math.abs((rs.getDouble(4)/oldrs.getDouble(3)) - 2.0)) < 0.20) {        			
+							divisor = divisor * 2;
+							date_de_que.add(rs.getString(1));
+							date_de_que.add(rs.getString(2));
+							de_que.add(rs.getDouble(3)/divisor); //open
+							de_que.add(rs.getDouble(4)/divisor);		//close		
+						}else if ((Math.abs((rs.getDouble(4)/oldrs.getDouble(3)) - 3.0)) < 0.30) {
+							divisor = divisor * 3;
+							date_de_que.add(rs.getString(1));
+							date_de_que.add(rs.getString(2));
+							de_que.add(rs.getDouble(3)/divisor); //open
+							de_que.add(rs.getDouble(4)/divisor);		//close		
+						}else if ((Math.abs((rs.getDouble(4)/oldrs.getDouble(3)) - 1.5)) < 0.15) {       	   
+							divisor = divisor * 1.5;
+							date_de_que.add(rs.getString(1));
+							date_de_que.add(rs.getString(2));
+							de_que.add(rs.getDouble(3)/divisor); //open
+							de_que.add(rs.getDouble(4)/divisor);		//close		
+						}else {
+							date_de_que.add(rs.getString(1));
+							date_de_que.add(rs.getString(2));
+							de_que.add(rs.getDouble(3)/divisor); //open
+							de_que.add(rs.getDouble(4)/divisor);		//close		
+						}
+					}
+					Object[] arr = de_que.toArray();				        
+					String [] ticker_arr = new String [arr.length/2];
+					String [] date_arr = new String [arr.length/2];
+					double [] open_arr = new double [arr.length/2];
+					double [] close_arr = new double [arr.length/2];       
+					int x = 0;
+					
+					for(Iterator dItr = de_que.iterator(); dItr.hasNext();) { 
+						open_arr[x] = (double) dItr.next();
+						close_arr[x] = (double) dItr.next();				        		
+						x++;
+					}
+					int p = 0;
+					for(Iterator dItr = date_de_que.iterator(); dItr.hasNext();) { 
+						ticker_arr[p] = (String) dItr.next();
+						date_arr[p] = (String) dItr.next();				        		
+						p++;
+					}	
+						
+					double ticker_return = 0;
+					double open = 0;
+					double close = 0;
+				        
+					if(i + 1 == trade_interval_num) { //if its the last interval
+						//last day = last day occuring on OR before last day
+						//currently using the before last day; need check for last day						
+						ticker_return = ((close_arr[multiplier + 60 - 2]/open_arr[multiplier - 1]) - 1);	
+						
+					} else { //if its the any other interval			        		
+						ticker_return = ((close_arr[58 + multiplier]/open_arr[multiplier - 1]) - 1);	
+					}
+					start_return_arr[i] = date_arr[multiplier - 1];
+					end_return_arr[i] = date_arr[58 + multiplier];
+					ticker_return_arr[j] = ticker_return;
+				}//end of if(next())
+				else{				        	
+				}
+      
+				fstmt.close();
+				stmt.close(); 				        
+				        
+			} // end of comapny loop
+			for(int q = 0; q < ticker_return_arr.length; q++) {
+				double industry_return = 0;
+				double total_ticker_return = 0;
+				for(int r = 0; r < ticker_return_arr.length; r++) {
+					if(q == r) {
+						//dont do nothing
+					}else {
+						total_ticker_return += ticker_return_arr[r];
+					}							
+				}
+
+				industry_return = ((1/(company_num - 1)) * total_ticker_return);
+				current_company = data.tickerList.get(q);
+										
+				insertPerformanceData.setString(1, industry);
+				insertPerformanceData.setString(2, current_company);
+				insertPerformanceData.setString(3, start_return_arr[i]);
+				insertPerformanceData.setString(4, end_return_arr[i]);
+				insertPerformanceData.setString(5, String.format("%10.7f", ticker_return_arr[q]));
+				insertPerformanceData.setString(6, String.format("%10.7f", industry_return));
+				int result = insertPerformanceData.executeUpdate();						
+				tstmt.close();						
+			}				
+			multiplier = multiplier + 60;
+			        
+		} // end of interval loop
+				
+	} 
+	
+        	
+}
