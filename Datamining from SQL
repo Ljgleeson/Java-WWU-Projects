@@ -1,0 +1,447 @@
+import java.util.Properties;
+import java.util.Scanner;
+import java.io.FileInputStream;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+
+import java.util.*;
+
+class Demo {
+
+//Note for TA: There was an issue where since I connected the demo class to the parameters for mysql its the only class name that will 
+//work for my code. I asked Professor Ahmed and he gave me permission to submit my assignment2 with the class name being demo so 
+// it should work properly still. I ran this in eclipse if that helps explain the issue.
+	
+	
+    static Connection conn = null;
+
+    public static void main(String[] args) throws Exception {
+        // Get connection properties
+        String paramsFile = "ConnectionParameters.txt";
+        if (args.length >= 1) {
+            paramsFile = args[0];
+        }
+        Properties connectprops = new Properties();
+        connectprops.load(new FileInputStream(paramsFile));
+
+        try {
+            // Get connection
+            Class.forName("com.mysql.jdbc.Driver");
+            String dburl = connectprops.getProperty("dburl");
+            String username = connectprops.getProperty("user");
+            conn = DriverManager.getConnection(dburl, connectprops);
+            System.out.printf("Database connection %s %s established.%n", dburl, username);
+
+           // showCompanies();
+
+            // Enter Ticker and TransDate, Fetch data for that ticker and date
+            Scanner in = new Scanner(System.in);
+            while (true) {
+                System.out.print("Enter a ticket symbol [start/end dates]: ");
+                String[] data = in.nextLine().trim().split("\\s+");
+                if (data[0].length() == 0) {
+                	System.out.println("Database connection closed.");
+                    break;
+                }
+                if(data.length == 3) {
+                	showTickerDay(data[0], data[1], data[2]);
+                }else if (data.length == 1) {
+                    showTickerDay(data[0]);
+                } else {
+                	System.out.println("Inproper input, database connection closed");
+                }
+            }
+
+            conn.close();
+        } catch (SQLException ex) {
+            System.out.printf("SQLException: %s%nSQLState: %s%nVendorError: %s%n",
+                                    ex.getMessage(), ex.getSQLState(), ex.getErrorCode());
+        }
+    }
+
+    static void showCompanies() throws SQLException {
+        // Create and execute a query
+        Statement stmt = conn.createStatement();
+        ResultSet results = stmt.executeQuery("select Ticker, Name from company");
+
+        // Show results
+        while (results.next()) {
+            System.out.printf("%5s %s%n", results.getString("Ticker"), results.getString("Name"));
+        }
+        stmt.close();
+    }
+
+    static void showTickerDay(String ticker, String edate, String sdate) throws SQLException {
+        // Prepare query
+    	//if not data specified: retrieve all priveVolume data. 
+        PreparedStatement pstmt = conn.prepareStatement("select *   from pricevolume   where Ticker = ?  order by TransDate DESC");   
+        PreparedStatement dmt = conn.prepareStatement("select *   from pricevolume   where Ticker = ? order by TransDate DESC");
+        PreparedStatement emt = conn.prepareStatement("select distinct Name   from company natural join pricevolume  where Ticker = ?");
+        // Fill in the blanks
+        pstmt.setString(1, ticker);
+        dmt.setString(1, ticker);
+        emt.setString(1, ticker);
+        ResultSet rs = pstmt.executeQuery();
+        ResultSet oldrs = dmt.executeQuery();
+        ResultSet namers = emt.executeQuery();
+       
+      
+        Deque<String> date_de_que = new ArrayDeque<String>(10000);         
+        Deque<Double> de_que = new ArrayDeque<Double>(10000); 
+        Double divisor = 1.0;
+        
+    	int count = 0;
+    	int daycount = 1;     
+
+
+    	Boolean start_check = false;
+    	
+    	//set up so rs is with current date and oldrs is day behind to do checks for splits.
+        if (rs.next()) {
+	
+	        	namers.next();
+	        	System.out.println(namers.getString(1));            	
+	        	
+	        	//checking if first value is the beginning data
+	        	if(rs.getString(2).equals(sdate)){
+	        		start_check = true;
+	        	}
+	        	
+	        	while(rs.next()) {       		
+	            	oldrs.next();
+	
+	            	String[] splitsdate = sdate.split("\\.");
+	            	int sdate_year = Integer.parseInt(splitsdate[0]);
+	            	int sdate_month = Integer.parseInt(splitsdate[1]);
+	            	int sdate_day = Integer.parseInt(splitsdate[2]);
+	
+	            	
+	        		String[] split = rs.getString(2).split("\\.");            	
+	            	int current_year = Integer.parseInt(split[0]);
+	            	int current_month = Integer.parseInt(split[1]);
+	            	int current_day = Integer.parseInt(split[2]);
+	            	
+	            	//if the date exist and is equal, it will be matched with this at some point
+	            	if(rs.getString(2).equals(sdate)){
+	            		start_check = true;
+	            	} //check for if sdate doesnt exist, to go to next one down
+	            	else if((current_month == sdate_month) && (current_day < sdate_day) && (current_year == sdate_year)) { 
+	            		start_check = true;            		
+	            	}else{
+	            		
+	            	}
+	
+	        		
+	        		if(start_check == true){
+	        			//iterates until it finds the end date 
+	                	while(rs.next()) {	                		
+	                		//split up current and end dates so can identify if its gone past a non-data-point end date
+	                		split = rs.getString(2).split("\\.");            	
+	                    	current_year = Integer.parseInt(split[0]);
+	                    	current_month = Integer.parseInt(split[1]);
+	                    	current_day = Integer.parseInt(split[2]);               		
+	                    	String[] splitedate = edate.split("\\.");
+	                    	int edate_year = Integer.parseInt(splitedate[0]);
+	                    	int edate_month = Integer.parseInt(splitedate[1]);
+	                    	int edate_day = Integer.parseInt(splitedate[2]);
+	
+	                		daycount++;
+	                		oldrs.next();
+	                		
+	                		//checks if they are equal
+	                		if(rs.getString(2).equals(edate)) {
+	                			break;
+	                		}
+	                		//checks if went past end day
+	                		else if ((current_month == edate_month) && (current_day < edate_day) && (current_year == edate_year))   {
+	                			break;
+	                		}
+	                		//check if into new month 
+	                		else if ((current_year == edate_year) && (current_month < edate_month)) {
+	                			break;         			
+	                		}
+	                		//check if went into new year
+	                		else if (current_year < edate_year) {
+	                			break;
+	                		}else {		                		
+		                		
+		                		if((Math.abs((rs.getDouble(6)/oldrs.getDouble(3)) - 2.0)) < 0.20) {
+		                			System.out.printf("2:1 split on %s %.2f --> %.2f%n", rs.getString(2), rs.getDouble(6), oldrs.getDouble(3));
+		                			divisor = divisor * 2;
+		                    		date_de_que.add(rs.getString(2));
+		                        	de_que.add(rs.getDouble(3)/divisor);
+		                        	de_que.add(rs.getDouble(4)/divisor);
+		                    		de_que.add(rs.getDouble(5)/divisor);
+		                			de_que.add(rs.getDouble(6)/divisor);
+		        		        	count++;
+		        		        }else if ((Math.abs((rs.getDouble(6)/oldrs.getDouble(3)) - 3.0)) < 0.30) {
+		        		        	System.out.printf("3:1 split on %s %.2f --> %.2f%n", rs.getString(2), rs.getDouble(6), oldrs.getDouble(3));
+		                			divisor = divisor * 3;
+		                    		date_de_que.add(rs.getString(2));
+		                        	de_que.add(rs.getDouble(3)/divisor);
+		                        	de_que.add(rs.getDouble(4)/divisor);
+		                    		de_que.add(rs.getDouble(5)/divisor);
+		                			de_que.add(rs.getDouble(6)/divisor);
+		        		        	count++;
+		        		        }else if ((Math.abs((rs.getDouble(6)/oldrs.getDouble(3)) - 1.5)) < 0.15) {
+		        		        	System.out.printf("3:2 split on %s %.2f --> %.2f%n", rs.getString(2), rs.getDouble(6), oldrs.getDouble(3));
+		                			divisor = divisor * 1.5;
+		                    		date_de_que.add(rs.getString(2));
+		                        	de_que.add(rs.getDouble(3)/divisor);
+		                        	de_que.add(rs.getDouble(4)/divisor);
+		                    		de_que.add(rs.getDouble(5)/divisor);
+		                			de_que.add(rs.getDouble(6)/divisor);
+		        		        	count++;
+		        		        }else {
+		                    		date_de_que.add(rs.getString(2));
+		                        	de_que.add(rs.getDouble(3)/divisor);
+		                        	de_que.add(rs.getDouble(4)/divisor);
+		                    		de_que.add(rs.getDouble(5)/divisor);
+		                			de_que.add(rs.getDouble(6)/divisor);
+		        		        }
+	                		}
+	                	}
+	                	break;
+	        		}
+		        			        		
+		        		
+	        	}
+	        	//end of while loop
+	        	System.out.println(count + " splits in " + daycount + " trading days");
+	        	System.out.println(" ");
+	        	        
+	        	System.out.println("Executing investment Strategy");        
+		        Object[] arr = de_que.toArray();
+		        double [] open_arr = new double [arr.length/4];
+		        double [] close_arr = new double [arr.length/4];
+		        String [] date_arr = new String [arr.length/4];
+		        Double current_cash = 0.0;
+		        int shares = 0;
+		        int transaction_count = 0;
+		        double average = 0.0;
+		        int i = 0;
+		        for(Iterator dItr = de_que.descendingIterator(); dItr.hasNext();) { 
+		           	 close_arr[i] = (double) dItr.next();
+		           	 dItr.next();
+		           	 dItr.next();
+		           	 open_arr[i] = (double) dItr.next();
+		       		 i++;
+		   	 	}
+		        int y = 0;
+		        for(Iterator dItr = date_de_que.descendingIterator(); dItr.hasNext();) { 
+		           	 date_arr[y] = (String) dItr.next();
+		       		 y++;
+		   	 	} 
+
+		        if(close_arr.length < 51) {
+		        	System.out.println("Net cash is 0");
+		        }else {
+		            int counter = 0;
+		            //loops from 0 to 7419 ( = 7420 values) (last calculation will be when counter = 7418 (dont want the very last one
+		            for(int p = 0; p < close_arr.length; p++) {  
+		            	average = 0.0;
+		            	if(p>49) {
+				            for(int x = p - 1; x >= counter; x-- ) {
+				            	average += close_arr[x];
+		
+				            }
+				            average = average/50;
+				            counter++;		            	            
+				  	         
+				            //buy: current day < average of past 50 days && whats below this
+				  			  if((close_arr[p] < average) && ((close_arr[p]/open_arr[p]) < 0.97000001)) {
+				  				  shares += 100;
+				  				  Double val = open_arr[p + 1];
+				  				  current_cash -= (val*100);
+				  				  current_cash -= 8.0;
+				  				  transaction_count++;
+				  			
+				  			//selling on the same day, but need the average. 		
+				  			  }else if ((shares > 99) && (open_arr[p] > average) && 
+				  					  ((open_arr[p] /close_arr[p-1]) > 1.00999999)) {
+				  				  shares -= 100;
+				  				  double val = (open_arr[p] + close_arr[p]);
+				  				  current_cash += ((val/2) * 100);
+				  				  current_cash -= 8.0;
+				  				  transaction_count ++;		  		
+				  			  }else {	  				  
+				  			  }	            
+		            	}
+		       	 	}                
+		            if(shares > 0) {
+		            	transaction_count++;
+		            	current_cash += (shares * (open_arr[open_arr.length - 1]));
+		            }
+		          System.out.println("Transaction executed: " + transaction_count);
+		          System.out.printf("Net cash: %.02f \n", current_cash);
+		          System.out.println(" ");            
+		        }
+        }
+        else {
+        	System.out.printf("%s not found in the database %n", ticker);
+        	System.out.println(" ");
+        }
+            
+        pstmt.close();
+        dmt.close();
+        emt.close();
+    }
+    
+    static void showTickerDay(String ticker) throws SQLException {
+        // Prepare query
+        PreparedStatement pstmt = conn.prepareStatement("select *   from pricevolume   where Ticker = ?  order by TransDate DESC");
+        PreparedStatement dmt = conn.prepareStatement("select *   from pricevolume   where Ticker = ?  order by TransDate DESC");
+        PreparedStatement emt = conn.prepareStatement("select distinct Name   from company natural join pricevolume  where Ticker = ?");
+
+        Deque<String> date_de_que = new ArrayDeque<String>(10000);         
+        Deque<Double> de_que = new ArrayDeque<Double>(10000); 
+        Double divisor = 1.0;
+        
+        // Fill in the blanks
+        pstmt.setString(1, ticker);
+        dmt.setString(1, ticker);
+        emt.setString(1, ticker);
+        ResultSet rs = pstmt.executeQuery();
+        ResultSet oldrs = dmt.executeQuery();
+        ResultSet namers = emt.executeQuery();
+        
+
+      //set up so rs is with current date and oldrs is day behind to do checks for splits.
+        if (rs.next()) {
+        	namers.next();
+        	System.out.println(namers.getString(1));
+        	int count = 0;
+        	int daycount = 1;      
+        	
+        	date_de_que.add(rs.getString(2));
+        	de_que.add(rs.getDouble(3)/divisor);
+        	de_que.add(rs.getDouble(4)/divisor);
+    		de_que.add(rs.getDouble(5)/divisor);
+			de_que.add(rs.getDouble(6)/divisor);
+			
+        	while(rs.next()) {       		
+        		daycount++;
+        		oldrs.next();
+        		
+        		if((Math.abs((rs.getDouble(6)/oldrs.getDouble(3)) - 2.0)) < 0.20) {
+        			System.out.printf("2:1 split on %s %.2f --> %.2f%n", rs.getString(2), rs.getDouble(6), oldrs.getDouble(3));
+        			divisor = divisor * 2;
+            		date_de_que.add(rs.getString(2));
+                	de_que.add(rs.getDouble(3)/divisor);
+                	de_que.add(rs.getDouble(4)/divisor);
+            		de_que.add(rs.getDouble(5)/divisor);
+        			de_que.add(rs.getDouble(6)/divisor);
+		        	count++;
+		        }else if ((Math.abs((rs.getDouble(6)/oldrs.getDouble(3)) - 3.0)) < 0.30) {
+		        	System.out.printf("3:1 split on %s %.2f --> %.2f%n", rs.getString(2), rs.getDouble(6), oldrs.getDouble(3));
+        			divisor = divisor * 3;
+            		date_de_que.add(rs.getString(2));
+                	de_que.add(rs.getDouble(3)/divisor);
+                	de_que.add(rs.getDouble(4)/divisor);
+            		de_que.add(rs.getDouble(5)/divisor);
+        			de_que.add(rs.getDouble(6)/divisor);
+		        	count++;
+		        }else if ((Math.abs((rs.getDouble(6)/oldrs.getDouble(3)) - 1.5)) < 0.15) {
+		        	System.out.printf("3:2 split on %s %.2f --> %.2f%n", rs.getString(2), rs.getDouble(6), oldrs.getDouble(3));       	   
+        			divisor = divisor * 1.5;
+            		date_de_que.add(rs.getString(2));
+                	de_que.add(rs.getDouble(3)/divisor);
+                	de_que.add(rs.getDouble(4)/divisor);
+            		de_que.add(rs.getDouble(5)/divisor);
+        			de_que.add(rs.getDouble(6)/divisor);
+		        	count++;
+		        }else {
+	        		date_de_que.add(rs.getString(2));
+	            	de_que.add(rs.getDouble(3)/divisor);
+	            	de_que.add(rs.getDouble(4)/divisor);
+	        		de_que.add(rs.getDouble(5)/divisor);
+	    			de_que.add(rs.getDouble(6)/divisor);
+		        }
+        	}
+
+        	System.out.println(count + " splits in " + daycount + " trading days");
+        	System.out.println(" ");       
+       
+        	System.out.println("Executing investment Strategy");	        
+	        Object[] arr = de_que.toArray();
+	        double [] open_arr = new double [arr.length/4];
+	        double [] close_arr = new double [arr.length/4];
+	        String [] date_arr = new String [arr.length/4];
+	        Double current_cash = 0.0;
+	        int shares = 0;
+	        int transaction_count = 0;
+	        double average = 0.0;
+	        int i = 0;
+	        //adds each open value to an array and each close value to another array
+	        for(Iterator dItr = de_que.descendingIterator(); dItr.hasNext();) { 
+	           	 close_arr[i] = (double) dItr.next();
+	           	 dItr.next();
+	           	 dItr.next();
+	           	 open_arr[i] = (double) dItr.next();
+	       		 i++;
+	   	 	}
+	        int y = 0;
+	        //adds each date to a string array
+	        for(Iterator dItr = date_de_que.descendingIterator(); dItr.hasNext();) { 
+	           	 date_arr[y] = (String) dItr.next();
+	       		 y++;
+	   	 	} 
+	 
+	        if(close_arr.length < 51) {
+	        	System.out.println("Net cash is 0");
+	        }else {
+	            int counter = 0;
+	            //loops for each tuple to get each open and close value
+	            for(int p = 0; p < close_arr.length; p++) {  
+	            	average = 0.0;
+	            	if(p>49) {
+	            		//gets average of previous 50 days close price of each p day
+			            for(int x = p - 1; x >= counter; x-- ) {
+			            	average += close_arr[x];
+			            }
+			            average = average/50;
+			            //counter to have a bottom so the loop doesnt go to 0 each time, only needs previous 50
+			            counter++;		            	            
+			  	         
+			            //buy: 
+			  			  if((close_arr[p] < average) && ((close_arr[p]/open_arr[p]) < 0.97000001)) {
+			  				  shares += 100;
+			  				  double val = open_arr[p + 1];
+			  				  current_cash -= (val*100);
+			  				  current_cash -= 8.0;
+			  				  transaction_count++;
+			  			//selling on the same day, but need the average. 		
+			  			  }else if ((shares > 99) && (open_arr[p] > average) && ((open_arr[p] /close_arr[p-1]) > 1.00999999)) {
+			  				  shares -= 100;
+			  				  double val = (open_arr[p] + close_arr[p]);
+			  				  current_cash += ((val/2) * 100);
+			  				  current_cash -= 8.0;
+			  				  transaction_count ++;
+			  				//  System.out.println("Sell on day: " + date_arr[p] + " shares @ " + val/2 + " total shares " + shares + ", cash = " + current_cash);
+			  			  }else {			  				  
+			  			  }			            
+	            	}	
+	       	 	}                
+	            if(shares > 0) {
+	            	transaction_count++;
+	            	current_cash += (shares * (open_arr[open_arr.length - 1]));
+	            }
+	          System.out.println("Transaction executed: " + transaction_count);
+	          System.out.printf("Net cash: %.02f \n", current_cash);
+	          System.out.println(" ");  
+	        }
+	
+	        }else {
+	        	System.out.printf("%s not found in the database %n", ticker);
+	        	System.out.println(" ");
+	        }
+	        pstmt.close();
+	        dmt.close();
+	        emt.close();
+    }
+    
+}
